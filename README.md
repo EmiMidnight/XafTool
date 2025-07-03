@@ -10,5 +10,10 @@ XafTool.exe -verbose <path_to_xaf>
 ```
 
 ## Building
-To build XafTool, I recommend using Visual Studio 2022 or later as it's using C++ 23.
-At some point I might replace the WIN32 API calls with something more cross-platform and switch to cmake, but for now it's Windows only.
+To build the project you will need cmake and a compiler of your choice, depending on your platform.
+On Windows, I recommend Visual Studio 2022. This project uses C++ 23 so as long as your compiler supports it, that's fine.
+```bah
+mkdir build
+cmake ...
+```
+Should be all you need to get going. 
