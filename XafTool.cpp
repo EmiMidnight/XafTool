@@ -1,4 +1,3 @@
-#include <Windows.h>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -87,22 +86,30 @@ enum XafCompressionType {
 
 static constexpr int kHEADER_SIZE = 0x100;
 
-static int readFromFile(HANDLE fileHandle, void* buffer, size_t size) {
-	DWORD bytesRead;
-	if (!ReadFile(fileHandle, buffer, static_cast<DWORD>(size), &bytesRead, nullptr)) {
-		std::println("Error reading from file: {}", GetLastError());
+static int readFromFile(std::ifstream& fileHandle, void* buffer, size_t size) {
+	fileHandle.read(static_cast<char*>(buffer), size);
+
+	std::streamsize bytesRead = static_cast<std::streamsize>(size);
+
+	if(fileHandle.gcount() != bytesRead)
+	{
+		std::println("Error reading from file.");
 		return -1;
 	}
-	return static_cast<int>(bytesRead);
+
+	return static_cast<int>(bytesRead); 
 }
 
-static int moveFileCursor(HANDLE fileHandle, uint64_t offset, DWORD moveMethod) {
-	LARGE_INTEGER li{};
-	li.QuadPart = offset;
-	if (!SetFilePointerEx(fileHandle, li, nullptr, moveMethod)) {
-		std::println("Error moving file cursor: {}", GetLastError());
+static int moveFileCursor(std::ifstream& fileHandle, uint64_t offset, std::ios_base::seekdir moveMethod) {
+	fileHandle.seekg(offset, moveMethod);
+	std::streampos pos = fileHandle.tellg();
+	
+	if(pos != offset)
+	{
+		std::println("Error moving file cursor.");
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -127,8 +134,8 @@ int main(int argc, char** argv)
 	// For now, extract to the same folder the .xaf is in.
 	std::string outputFolder = std::filesystem::canonical(filePath).remove_filename().string();
 
-	HANDLE fileHandle = CreateFileA(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-	if (fileHandle == INVALID_HANDLE_VALUE) {
+	std::ifstream fileHandle(filePath, std::ios::binary);
+	if (!fileHandle.is_open()) {
 		std::println("Failed to open file: {}", filePath);
 		return 1;
 	}
@@ -141,7 +148,7 @@ int main(int argc, char** argv)
 	if (signature != "xaf0")
 	{
 		std::println("{}Invalid XAF file signature: {}{}", ANSI_COLOR_RED, signature, ANSI_COLOR_RESET);
-		CloseHandle(fileHandle);
+		fileHandle.close();
 		return 1;
 	}
 
@@ -171,7 +178,7 @@ int main(int argc, char** argv)
 	std::println("Comment: {}", std::string(header.comment, 64));
 
 	// Header's all parsed, let's move on to the file list
-	moveFileCursor(fileHandle, kHEADER_SIZE, FILE_BEGIN);
+	moveFileCursor(fileHandle, kHEADER_SIZE, std::ios::beg);
 	std::vector<XafFileEntry> fileEntries;
 	// Newer game versions have a different file entry structure, so we need to check the version
 	// This kinda sucks I think but it works for now.
@@ -245,8 +252,8 @@ int main(int argc, char** argv)
 					}
 					auto& parent = entries[parentId];
 					std::string parentPath = parent.name;
-					if (parentPath.back() != '\\') {
-						parentPath += '\\';
+					if (parentPath.back() != static_cast<char>(std::filesystem::path::preferred_separator)) {
+						parentPath += static_cast<char>(std::filesystem::path::preferred_separator);
 					}
 
 					folderList.push_back(parentPath);
@@ -279,7 +286,7 @@ int main(int argc, char** argv)
 			}
 
 			if (!fileEntry.flags.isFile) {
-				std::string finalPath = outputFolder + "\\" + fullPath;
+				std::string finalPath = outputFolder + static_cast<char>(std::filesystem::path::preferred_separator) + fullPath;
 				std::filesystem::path outputPath = std::filesystem::path(finalPath);
 				try {
 					std::filesystem::create_directories(outputPath);
@@ -296,43 +303,41 @@ int main(int argc, char** argv)
 			{
 			case UNCOMPRESSED:
 			{
-				moveFileCursor(fileHandle, fileEntry.sectorStartIndex * header.sectorSize, FILE_BEGIN);
+				moveFileCursor(fileHandle, fileEntry.sectorStartIndex * header.sectorSize, std::ios::beg);
 
 				// Uncompressed files do not have the YS header, so we can just dump them to disk immediately. Yay.
 				std::vector<uint8_t> fileBuffer(fileEntry.size);
 				readFromFile(fileHandle, fileBuffer.data(), fileEntry.size);
 
-				std::string finalPath = outputFolder + "\\" + fullPath;
+				std::string finalPath = outputFolder + static_cast<char>(std::filesystem::path::preferred_separator) + fullPath;
 
-				HANDLE hOutFile = CreateFileA(finalPath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-				if (hOutFile != INVALID_HANDLE_VALUE) {
-					DWORD bytesWritten;
-					WriteFile(hOutFile, fileBuffer.data(), fileBuffer.size(), &bytesWritten, NULL);
-					CloseHandle(hOutFile);
+				std::ofstream hOutFile(finalPath, std::ios::binary);
+				if (hOutFile.is_open()) {
+					hOutFile.write(reinterpret_cast<const char*>(fileBuffer.data()), fileBuffer.size());
+					hOutFile.close();
 				}
 			}
 			break;
 			case LZW_COMPRESSED:
 			{
-				moveFileCursor(fileHandle, fileEntry.sectorStartIndex * header.sectorSize, FILE_BEGIN);
+				moveFileCursor(fileHandle, fileEntry.sectorStartIndex * header.sectorSize, std::ios::beg);
 				// Compressed files all have a 4 byte header starting with "YS", I assume because Yabukita::Stream
 				// We need to skip past it, and make sure to subtract that tiny header from the final size too...
 				size_t actualSize = fileEntry.compressedSize - 4;
 				std::vector<uint8_t> inputBuffer(actualSize);
 
-				DWORD ysMagic = 0;
+				uint32_t ysMagic = 0;
 				readFromFile(fileHandle, &ysMagic, 4);
 				readFromFile(fileHandle, inputBuffer.data(), actualSize);
 
 				LZWDecoder decoder(inputBuffer.data(), actualSize, fileEntry.size);
 				std::vector<uint8_t> decompressed = decoder.decode();
 
-				std::string finalPath = outputFolder + "\\" + fullPath;
-				HANDLE hOutFile = CreateFileA(finalPath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-				if (hOutFile != INVALID_HANDLE_VALUE) {
-					DWORD bytesWritten;
-					WriteFile(hOutFile, decompressed.data(), decompressed.size(), &bytesWritten, NULL);
-					CloseHandle(hOutFile);
+				std::string finalPath = outputFolder + static_cast<char>(std::filesystem::path::preferred_separator) + fullPath;
+				std::ofstream hOutFile(finalPath, std::ios::binary);
+				if (hOutFile.is_open()) {
+					hOutFile.write(reinterpret_cast<const char*>(decompressed.data()), decompressed.size());
+					hOutFile.close();
 				}
 				else {
 					std::println("{}Failed to create output file: {}{}", ANSI_COLOR_RED, finalPath, ANSI_COLOR_RESET);
@@ -355,6 +360,6 @@ int main(int argc, char** argv)
 		processEntries(fileEntries);
 	}
 
-	CloseHandle(fileHandle);
+	fileHandle.close();
 	std::println("{}My work here is done.{}", ANSI_COLOR_GREEN, ANSI_COLOR_RESET);
 }
