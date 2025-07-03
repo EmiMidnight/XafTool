@@ -20,10 +20,10 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="LZWDecoder.hpp">
+    <ClInclude Include="includes\CLI11.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="includes\CLI11.hpp">
+    <ClInclude Include="includes\LZWDecoder.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

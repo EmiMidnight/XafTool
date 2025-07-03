@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <cstdint>
 #include <filesystem>
-#include "includes/CLI11.hpp"
 
+#include "CLI11.hpp"
 #include "LZWDecoder.hpp"
 
 constexpr auto ANSI_COLOR_RED = "\x1b[31m";
@@ -125,7 +125,7 @@ int main(int argc, char** argv)
 	CLI11_PARSE(app, argc, argv);
 
 	// For now, extract to the same folder the .xaf is in.
-	std::string outputFolder = std::filesystem::path(filePath).parent_path().string();
+	std::string outputFolder = std::filesystem::canonical(filePath).remove_filename().string();
 
 	HANDLE fileHandle = CreateFileA(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (fileHandle == INVALID_HANDLE_VALUE) {
